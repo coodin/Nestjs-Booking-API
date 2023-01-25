@@ -8,6 +8,7 @@ import * as argon from 'argon2';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { AuthLocalDto } from './dto/auth_local.dto';
 
 @Injectable()
 export class AuthService {
@@ -93,5 +94,66 @@ export class AuthService {
     return {
       access_token: token,
     };
+  }
+
+  async singUpWithLocal(dto: AuthLocalDto) {
+    // generate the password hash
+    const hash = await argon.hash(dto.password);
+    try {
+      const user = await this.prisma.user.create({
+        data: {
+          username: dto.username,
+          hash,
+        },
+      });
+      delete user.hash;
+      return user;
+    } catch (error) {
+      if (
+        error instanceof
+        PrismaClientKnownRequestError
+      ) {
+        if (error.code === 'P2002') {
+          throw new ForbiddenException(
+            'Credentials taken',
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  async validateUserLocal(
+    username: string,
+    password: string,
+  ) {
+    // find the user by email
+    const user =
+      await this.prisma.user.findUnique({
+        where: { username },
+      });
+
+    // if user does not exist throw exception
+    if (!user) {
+      console.log('This one ');
+
+      throw new ForbiddenException(
+        'Credentials incorrect',
+      );
+    }
+
+    // compare password
+    const pwMatches = await argon.verify(
+      user.hash,
+      password,
+    );
+    if (!pwMatches) {
+      console.log('The other one  ');
+      throw new ForbiddenException(
+        'Credentials incorrect',
+      );
+    }
+    const { hash, ...restUser } = user;
+    return restUser;
   }
 }
